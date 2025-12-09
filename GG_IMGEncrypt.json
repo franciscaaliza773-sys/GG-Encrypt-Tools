@@ -1,0 +1,83 @@
+{
+  "id": "gg-workflow-audio-in-0001",
+  "revision": 0,
+  "last_node_id": 1,
+  "last_link_id": 0,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "GG_IMGEncrypt",
+      "pos": [
+        575,
+        368
+      ],
+      "size": [
+        460,
+        340
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "label": "audio",
+          "name": "audio",
+          "type": "AUDIO",
+          "shape": 7,
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "IMAGE",
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "GG_IMGEncrypt"
+      },
+      "widgets_values": [
+        "123456",
+        "GG_Encrypt",
+        true,
+        16,
+        "此节点仅用于用户隐私保护，使用即承诺合法合规使用本工具，自愿承担全部风险与责任\\n建议设置密码，可以更大程度提升隐私保护安全性\\n需配合小程序"GGEncrypt加密"使用\\nfps: 用于后续将多张加密图片合成为视频时的播放帧率，可根据需要调整\\npassword: 解码时需要的密码，默认密码：123456（可修改）\\ntitle: 标题，会显示在加密图片上方黑底白字水印区域（可选）\\npub_key: RSA 公钥模数（十六进制字符串），可选，留空则使用默认公钥\\n注意：rsa_e 固定为 65537，无需输入\\n注意：本工具仅提供技术手段，请勿用于任何违法、侵权用途",
+        ""
+      ]
+    }
+  ],
+  "links": [],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "0246.VERSION": [
+      0,
+      0,
+      4
+    ],
+    "ue_links": [],
+    "links_added_by_ue": [],
+    "ds": {
+      "scale": 1,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    "frontendVersion": "1.23.0",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}
