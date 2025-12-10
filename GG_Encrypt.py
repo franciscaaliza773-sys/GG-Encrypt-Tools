@@ -193,7 +193,7 @@ def _encrypt_payload_to_image(
                 tw, th = len(title) * 10, 24  # 简单估算
 
         x = max(0, (target_width - tw) // 2)
-        y = max(0, (header_rows - th) // 2)
+        y = max(0, (HEADER_ROWS - th) // 2)
         d.text((x, y), title, fill=(255, 255, 255), font=font)
 
     return img
@@ -205,7 +205,6 @@ class GG_IMGEncrypt:
         return {
             "required": {
                 "images": ("IMAGE",),
-                "audio": ("AUDIO",),  # 仅输入音频，不输出
                 "password": ("STRING", {
                     "default": "123456",
                     "multiline": False
@@ -239,15 +238,19 @@ class GG_IMGEncrypt:
                     "default": "",
                     "multiline": False
                 }),
-            }
+            },
+            "optional": {
+                "audio": ("AUDIO",),  # 变为可选输入
+            },
         }
 
     RETURN_TYPES = ("IMAGE",)  # 只输出 IMAGE
     FUNCTION = "encode"
     CATEGORY = "GG Tools"
 
-    def encode(self, images, audio, password, title,
-               skip_watermark_area, fps, note, pub_key):
+    def encode(self, images, password, title,
+               skip_watermark_area, fps, note, pub_key,
+               audio=None):
         # images: [B,H,W,C] float32 0..1
         x = images[0].cpu().numpy()
         x = (np.clip(x, 0.0, 1.0) * 255).astype("uint8")
@@ -272,7 +275,7 @@ class GG_IMGEncrypt:
         enc_np = np.array(enc_pil).astype("float32") / 255.0
         enc_tensor = torch.from_numpy(enc_np)[None, ...]
 
-        # audio 仅作为输入参与整个工作流，不在本节点输出
+        # audio 是可选输入，仅用于保持工作流结构，本节点不输出音频
         return (enc_tensor,)
 
 
