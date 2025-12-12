@@ -1,6 +1,11 @@
-# __init__.py
-# GG IMGEncrypt 自定义节点插件入口
+from .GG_Encrypt import GG_IMGEncrypt
 
-from .GG_IMGEncrypt import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+NODE_CLASS_MAPPINGS = {
+    "GG_IMGEncrypt": GG_IMGEncrypt
+}
+
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "GG_IMGEncrypt": "GG Encrypt Tool"
+}
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]

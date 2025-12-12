@@ -4,8 +4,11 @@ import struct
 import zlib
 import hashlib
 import secrets
+import zipfile
+import wave
 import numpy as np
 import torch
+import imageio
 from PIL import Image, ImageDraw, ImageFont
 from Crypto.Cipher import AES, PKCS1_OAEP
 from Crypto.PublicKey import RSA
@@ -17,6 +20,7 @@ PAYLOAD_MAGIC = b"GGFILE1"
 
 # 顶部水印区域高度（像素）
 HEADER_ROWS = 80
+
 _KEY_PARTS = [
     0xb5ab048b1126700b1b2d923635a13c46,
     0xea6b79cedbd979e386172a9a2907d505,
@@ -38,10 +42,6 @@ _KEY_PARTS = [
 
 
 def _get_public_key(custom_hex=None):
-    """
-    如果提供了 custom_hex（十六进制模数字符串），优先用自定义公钥；
-    否则使用内置默认公钥。rsa_e 固定为 65537。
-    """
     if custom_hex:
         s = str(custom_hex).strip()
         if s:
@@ -49,9 +49,7 @@ def _get_public_key(custom_hex=None):
                 n = int(s, 16)
                 return RSA.construct((n, 65537))
             except Exception:
-                # 自定义解析失败则退回默认公钥
                 pass
-
     n = 0
     for part in _KEY_PARTS:
         n = (n << 128) | part
@@ -98,20 +96,15 @@ def _encrypt_payload_to_image(
     skip_watermark_area=True,
     target_width=None,
 ):
-    # 压缩
     compressed = zlib.compress(payload, level=9)
-
-    # AES-GCM
     aes_key = secrets.token_bytes(32)
     nonce = secrets.token_bytes(12)
     cipher_aes = AES.new(aes_key, AES.MODE_GCM, nonce=nonce)
     ciphertext, tag = cipher_aes.encrypt_and_digest(compressed)
 
-    # 密码哈希（可选）
     password = password or ""
     pwd_hash = hashlib.sha256(password.encode("utf-8")).digest() if password else None
 
-    # 会话块 + RSA-OAEP
     session_plain = _pack_session(aes_key, nonce, tag, pwd_hash)
     cipher_rsa = PKCS1_OAEP.new(public_key, hashAlgo=SHA256)
     enc_session = cipher_rsa.encrypt(session_plain)
@@ -132,14 +125,12 @@ def _encrypt_payload_to_image(
     container += ciphertext
     container = bytes(container)
 
-    # 映射为像素，宽度自动计算
     bpp = 3
     total_data = len(container)
     pixels_needed = int(math.ceil(total_data / float(bpp)))
 
     if target_width is None or target_width < 16:
         target_width = max(64, int(math.sqrt(pixels_needed)))
-    # 最小宽度 240，保证水印区域足够宽
     target_width = max(240, min(target_width, 4096))
 
     header_rows = HEADER_ROWS if skip_watermark_area else 0
@@ -162,12 +153,11 @@ def _encrypt_payload_to_image(
 
     img = Image.frombytes("RGB", (target_width, height), bytes(buf))
 
-    # 顶部黑底白字水印（固定字号）
     if title and skip_watermark_area and header_rows > 0:
         d = ImageDraw.Draw(img)
         d.rectangle([(0, 0), (target_width, header_rows - 1)], fill=(0, 0, 0))
 
-        font_size = 40  # 固定字号
+        font_size = 40
         font = None
         for fname in ("arial.ttf", "DejaVuSans.ttf", "NotoSansCJK-Regular.ttc"):
             try:
@@ -181,7 +171,6 @@ def _encrypt_payload_to_image(
             except Exception:
                 font = None
 
-        # 计算文字尺寸，用于居中
         if hasattr(d, "textbbox"):
             bbox = d.textbbox((0, 0), title, font=font)
             tw = bbox[2] - bbox[0]
@@ -190,13 +179,32 @@ def _encrypt_payload_to_image(
             if font is not None and hasattr(font, "getsize"):
                 tw, th = font.getsize(title)
             else:
-                tw, th = len(title) * 10, 24  # 简单估算
+                tw, th = len(title) * 10, 24
 
         x = max(0, (target_width - tw) // 2)
-        y = max(0, (HEADER_ROWS - th) // 2)
+        y = max(0, (header_rows - th) // 2)
         d.text((x, y), title, fill=(255, 255, 255), font=font)
 
     return img
+
+
+def _convert_audio_to_wav_bytes(audio_dict):
+    waveform = audio_dict['waveform']
+    sample_rate = audio_dict['sample_rate']
+    if waveform.dim() == 3:
+        waveform = waveform[0]
+    audio_np = waveform.cpu().numpy()
+    audio_np = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)
+    if audio_np.shape[0] < audio_np.shape[1]: 
+        audio_np = audio_np.T
+    channels = audio_np.shape[1] if audio_np.ndim > 1 else 1
+    io_buf = io.BytesIO()
+    with wave.open(io_buf, 'wb') as wf:
+        wf.setnchannels(channels)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(audio_np.tobytes())
+    return io_buf.getvalue()
 
 
 class GG_IMGEncrypt:
@@ -221,17 +229,24 @@ class GG_IMGEncrypt:
                     "min": 1,
                     "max": 120
                 }),
+                "video_quality": ("INT", {
+                    "default": 6, 
+                    "min": 0, 
+                    "max": 10,
+                    "step": 1,
+                    "display": "number",
+                    "label": "Video Quality (10=Best)" 
+                }),
                 "note": ("STRING", {
                     "default":
 "此节点仅用于用户隐私保护，使用即承诺合法合规使用本工具，自愿承担全部风险与责任\n"
 "建议设置密码，可以更大程度提升隐私保护安全性\n"
-"需配合 小程序GGIMG加密 使用\n"
-"fps: 用于后续将多张加密图片合成为视频时的播放帧率，可根据需要调整\n"
-"password: 解码时需要的密码，30位以内（可选）\n"
+"需配合 GG解密工具 使用\n"
+"fps: 若输入是多帧图片(视频)，将压缩为MP4后加密\n"
+"video_quality: 视频压缩质量 (0-10)，越高越清晰但体积越大\n"
+"password: 解码时需要的密码，默认 123456\n"
 "title: 标题，会显示在加密图片上方黑底白字水印区域（可选）\n"
-"pub_key: RSA 公钥模数（十六进制字符串），可选，留空则使用默认公钥\n"
-"注意：rsa_e 固定为 65537，无需输入\n"
-"注意：本工具仅提供技术手段，请勿用于任何违法、侵权用途",
+"pub_key: RSA 公钥模数（十六进制），可选\n",
                     "multiline": True
                 }),
                 "pub_key": ("STRING", {
@@ -240,27 +255,70 @@ class GG_IMGEncrypt:
                 }),
             },
             "optional": {
-                "audio": ("AUDIO",),  # 变为可选输入
-            },
+                "audio": ("AUDIO",),
+            }
         }
 
-    RETURN_TYPES = ("IMAGE",)  # 只输出 IMAGE
+    RETURN_TYPES = ("IMAGE",)
     FUNCTION = "encode"
     CATEGORY = "GG Tools"
 
-    def encode(self, images, password, title,
-               skip_watermark_area, fps, note, pub_key,
-               audio=None):
-        # images: [B,H,W,C] float32 0..1
-        x = images[0].cpu().numpy()
-        x = (np.clip(x, 0.0, 1.0) * 255).astype("uint8")
-        pil_in = Image.fromarray(x, "RGB")
+    def encode(self, images, password, title, skip_watermark_area, fps, video_quality, note, pub_key, audio=None):
+        
+        batch_size = images.shape[0]
+        
+        # 1. 准备核心数据 (图片 or MP4)
+        if batch_size > 1:
+            # === 视频模式 ===
+            print(f"[GG_Encrypt] Detected Video Input ({batch_size} frames). Compressing to MP4...")
+            frames = (images.cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+            video_buf = io.BytesIO()
+            crf = int(50 - (video_quality / 10.0) * 32)
+            
+            try:
+                with imageio.get_writer(video_buf, format='mp4', fps=fps, codec='libx264', quality=None, pixelformat='yuv420p', macro_block_size=None, ffmpeg_params=['-crf', str(crf)]) as writer:
+                    for frame in frames:
+                        writer.append_data(frame)
+                main_data_bytes = video_buf.getvalue()
+                main_filename = "video.mp4"
+            except Exception as e:
+                print(f"[GG_Encrypt] Video compression failed: {e}. Falling back to first frame.")
+                pil_in = Image.fromarray(frames[0], "RGB")
+                img_buf = io.BytesIO()
+                pil_in.save(img_buf, format="PNG")
+                main_data_bytes = img_buf.getvalue()
+                main_filename = "image.png"
+                
+        else:
+            # === 单图模式 ===
+            x = images[0].cpu().numpy()
+            x = (np.clip(x, 0.0, 1.0) * 255).astype("uint8")
+            pil_in = Image.fromarray(x, "RGB")
+            img_buf = io.BytesIO()
+            pil_in.save(img_buf, format="PNG")
+            main_data_bytes = img_buf.getvalue()
+            main_filename = "image.png"
 
-        buf = io.BytesIO()
-        pil_in.save(buf, format="PNG")
-        png_bytes = buf.getvalue()
+        # 2. 混合音频
+        if audio is not None:
+            try:
+                wav_bytes = _convert_audio_to_wav_bytes(audio)
+                zip_buf = io.BytesIO()
+                with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+                    zf.writestr(main_filename, main_data_bytes)
+                    zf.writestr("audio.wav", wav_bytes)
+                final_data = zip_buf.getvalue()
+                final_name = "bundle.zip"
+            except Exception as e:
+                print(f"[GG_Encrypt] Audio Error: {e}")
+                final_data = main_data_bytes
+                final_name = main_filename
+        else:
+            final_data = main_data_bytes
+            final_name = main_filename
 
-        payload = _build_payload(png_bytes, "protected.png")
+        # 3. 加密输出
+        payload = _build_payload(final_data, final_name)
         pub = _get_public_key(pub_key)
 
         enc_pil = _encrypt_payload_to_image(
@@ -275,7 +333,6 @@ class GG_IMGEncrypt:
         enc_np = np.array(enc_pil).astype("float32") / 255.0
         enc_tensor = torch.from_numpy(enc_np)[None, ...]
 
-        # audio 是可选输入，仅用于保持工作流结构，本节点不输出音频
         return (enc_tensor,)
 
 

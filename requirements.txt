@@ -1,5 +1,4 @@
-# GG IMGEncrypt 节点依赖
-numpy
-torch
-Pillow
 pycryptodome
+imageio
+imageio-ffmpeg
+numpy
